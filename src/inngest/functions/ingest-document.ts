@@ -125,6 +125,9 @@ export const ingestDocument = inngest.createFunction(
                 generateText({
                   model: google("gemini-3-flash-preview"),
                   maxRetries: 0,
+                  providerOptions: {
+                    google: { thinkingConfig: { thinkingBudget: 0 } },
+                  },
                   messages: [
                     {
                       role: "user",
