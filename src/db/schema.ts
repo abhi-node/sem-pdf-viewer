@@ -4,6 +4,9 @@ import {
   timestamp,
   boolean,
   integer,
+  json,
+  index,
+  vector,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -55,3 +58,73 @@ export const verification = pgTable("verification", {
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
+
+export const document = pgTable("document", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  filename: text("filename").notNull(),
+  fileSize: integer("file_size").notNull(),
+  lastPage: integer("last_page").notNull().default(1),
+  ingestionStatus: text("ingestion_status").notNull().default("pending"),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+export const conversation = pgTable("conversation", {
+  id: text("id").primaryKey(),
+  documentId: text("document_id")
+    .notNull()
+    .references(() => document.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+export const message = pgTable(
+  "message",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversation.id, { onDelete: "cascade" }),
+    role: text("role").notNull(), // "user" | "assistant"
+    content: text("content").notNull(),
+    parts: json("parts"), // nullable — stores full parts array for assistant messages with tool calls
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("msg_conversation_id_idx").on(table.conversationId)],
+);
+
+export const documentChunk = pgTable(
+  "document_chunk",
+  {
+    id: text("id").primaryKey(),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => document.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    startPage: integer("start_page").notNull(),
+    endPage: integer("end_page").notNull(),
+    chunkIndex: integer("chunk_index").notNull(),
+    tokenCount: integer("token_count").notNull(),
+    embedding: vector("embedding", { dimensions: 768 }),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    index("dc_document_id_idx").on(table.documentId),
+    index("dc_user_id_idx").on(table.userId),
+    index("dc_embedding_idx").using(
+      "hnsw",
+      table.embedding.op("vector_cosine_ops"),
+    ),
+  ],
+);

@@ -1,0 +1,1 @@
+ALTER TABLE "document" ADD COLUMN "last_page" integer DEFAULT 1 NOT NULL;
