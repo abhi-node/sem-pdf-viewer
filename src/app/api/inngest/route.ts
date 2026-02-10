@@ -7,4 +7,5 @@ export const maxDuration = 800;
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [ingestDocument],
+  serveHost: process.env.INNGEST_SERVE_HOST,
 });
