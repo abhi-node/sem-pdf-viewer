@@ -12,7 +12,7 @@ Upload any PDF, and the system automatically extracts its content using Gemini V
 - **Clickable citations** — `[Pages X-Y]` references in AI responses link directly to the referenced page in the viewer
 - **Selection tool** — drag-select a region of the PDF and send it as an image to the AI for analysis
 - **Markdown rendering** — AI responses render with syntax highlighting, LaTeX math (KaTeX), and GFM tables
-- **Authentication** — email/password and Google OAuth via Better Auth
+- **Authentication** — email/password via Better Auth
 - **Background processing** — Inngest handles document ingestion with real-time progress indicators (pending → extracting → embedding → ready)
 
 ## Tech Stack
@@ -25,7 +25,7 @@ Upload any PDF, and the system automatically extracts its content using Gemini V
 | Styling | Tailwind CSS v4, shadcn/ui |
 | Database | PostgreSQL 17 + pgvector (Docker) |
 | ORM | Drizzle ORM |
-| Auth | Better Auth (email/password + Google SSO) |
+| Auth | Better Auth (email/password) |
 | AI | Vercel AI SDK v6, Gemini Flash 3 (vision + chat), Gemini Embedding 001 |
 | Background Jobs | Inngest |
 | PDF Rendering | react-pdf (client), pdf-to-img (server) |
@@ -35,7 +35,6 @@ Upload any PDF, and the system automatically extracts its content using Gemini V
 - [Bun](https://bun.sh) (>= 1.0)
 - [Docker](https://www.docker.com/) & Docker Compose
 - [Google Generative AI API key](https://aistudio.google.com/apikey) (for Gemini)
-- (Optional) Google OAuth credentials for SSO login
 
 ## Getting Started
 
@@ -61,8 +60,6 @@ Fill in the values:
 | `BETTER_AUTH_SECRET` | Random secret for session signing. Generate with `openssl rand -base64 32` |
 | `BETTER_AUTH_URL` | Your app URL. Default: `http://localhost:3000` |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Gemini API key — used for vision extraction, embeddings, and chat |
-| `GOOGLE_CLIENT_ID` | (Optional) Google OAuth client ID for SSO |
-| `GOOGLE_CLIENT_SECRET` | (Optional) Google OAuth client secret for SSO |
 
 ### 3. Start the database
 
@@ -100,7 +97,7 @@ Open [http://localhost:3000](http://localhost:3000) to use the app. The Inngest 
 
 ### User Flow
 
-1. **Sign up / log in** — create an account with email/password or Google SSO
+1. **Sign up / log in** — create an account with email/password
 2. **Upload a PDF** — the file is saved to `uploads/` and a database record is created. An Inngest event (`document/uploaded`) fires to start background processing
 3. **Ingestion pipeline** (3 steps, runs in Inngest):
    - **Extract** — PDF pages are rendered to PNG images (5 pages per group, 20 groups concurrently), sent to Gemini Flash 3 Vision to extract structured Markdown, and saved as document chunks
@@ -171,7 +168,7 @@ src/
 │   ├── globals.css           # Tailwind v4 + shadcn theme
 │   └── page.tsx              # Root redirect (→ dashboard or login)
 ├── components/
-│   ├── auth/                 # Login form, signup form, social buttons, sign-out
+│   ├── auth/                 # Login form, signup form, sign-out
 │   ├── dashboard/
 │   │   ├── dashboard-shell.tsx    # Main orchestrator (state management)
 │   │   ├── document-sidebar.tsx   # Document list + upload

@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { LoginForm } from "@/components/auth/login-form";
-import { SocialButtons } from "@/components/auth/social-buttons";
 import {
   Card,
   CardContent,
@@ -8,7 +7,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 
 export default function LoginPage() {
   return (
@@ -18,15 +16,6 @@ export default function LoginPage() {
         <CardDescription>Sign in to your account</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <SocialButtons />
-
-        <div className="relative">
-          <Separator />
-          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-            or
-          </span>
-        </div>
-
         <LoginForm />
 
         <p className="text-center text-sm text-muted-foreground">
