@@ -1,14 +1,12 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { randomUUID } from "crypto";
-import { writeFile, mkdir } from "fs/promises";
-import { join } from "path";
+import { put } from "@vercel/blob";
 import { auth } from "@/lib/auth";
 import { db } from "@/db";
 import { document } from "@/db/schema";
 import { inngest } from "@/inngest/client";
 
-const UPLOADS_DIR = join(process.cwd(), "uploads");
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 export async function POST(request: Request) {
@@ -42,11 +40,10 @@ export async function POST(request: Request) {
   }
 
   const id = randomUUID();
-  const filename = `${id}.pdf`;
+  const blobFilename = `${id}.pdf`;
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  await mkdir(UPLOADS_DIR, { recursive: true });
-  await writeFile(join(UPLOADS_DIR, filename), buffer);
+  const blob = await put(blobFilename, buffer, { access: "public" });
 
   const title = file.name.replace(/\.pdf$/i, "");
   const now = new Date();
@@ -57,7 +54,7 @@ export async function POST(request: Request) {
       id,
       userId: session.user.id,
       title,
-      filename,
+      filename: blob.url,
       fileSize: file.size,
       createdAt: now,
       updatedAt: now,
@@ -69,7 +66,7 @@ export async function POST(request: Request) {
     data: {
       documentId: id,
       userId: session.user.id,
-      filename,
+      blobUrl: blob.url,
     },
   });
 

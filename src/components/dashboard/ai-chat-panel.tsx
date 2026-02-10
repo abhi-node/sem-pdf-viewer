@@ -37,7 +37,7 @@ export function AiChatPanel({ documentId, currentPage, attachment, onClearAttach
   const [view, setView] = useState<"chat" | "list">("chat");
   const [inputValue, setInputValue] = useState("");
   const [isCreating, setIsCreating] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeConvIdRef = useRef(activeConversationId);
   activeConvIdRef.current = activeConversationId;
@@ -66,7 +66,8 @@ export function AiChatPanel({ documentId, currentPage, attachment, onClearAttach
   }, [documentId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = messagesContainerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   // Auto-resize textarea
@@ -271,7 +272,7 @@ export function AiChatPanel({ documentId, currentPage, attachment, onClearAttach
       ) : (
         /* Chat view — notebook-style */
         <>
-          <div className="flex-1 overflow-y-auto px-4 py-3">
+          <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-3">
             {messages.length === 0 && !isCreating ? (
               <div className="flex h-full items-center justify-center">
                 <div className="text-center">
@@ -360,7 +361,7 @@ export function AiChatPanel({ documentId, currentPage, attachment, onClearAttach
                       </div>
                     </div>
                   )}
-                <div ref={messagesEndRef} />
+
               </div>
             )}
           </div>

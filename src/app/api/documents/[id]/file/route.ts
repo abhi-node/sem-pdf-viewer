@@ -1,15 +1,9 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createReadStream } from "fs";
-import { stat } from "fs/promises";
-import { join } from "path";
-import { Readable } from "stream";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/db";
 import { document } from "@/db/schema";
-
-const UPLOADS_DIR = join(process.cwd(), "uploads");
 
 export async function GET(
   _request: Request,
@@ -34,25 +28,5 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const filePath = join(UPLOADS_DIR, doc.filename);
-
-  try {
-    await stat(filePath);
-  } catch {
-    return NextResponse.json(
-      { error: "File not found on disk" },
-      { status: 404 },
-    );
-  }
-
-  const stream = createReadStream(filePath);
-  const webStream = Readable.toWeb(stream) as ReadableStream;
-
-  return new Response(webStream, {
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="${doc.title}.pdf"`,
-      "Cache-Control": "private, max-age=3600",
-    },
-  });
+  return NextResponse.redirect(doc.filename);
 }

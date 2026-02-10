@@ -3,13 +3,9 @@ import { NonRetriableError } from "inngest";
 import { db } from "@/db";
 import { document, documentChunk } from "@/db/schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { join } from "path";
-import { stat } from "fs/promises";
 import { generateText, embedMany } from "ai";
 import { google } from "@ai-sdk/google";
 import pLimit from "p-limit";
-
-const UPLOADS_DIR = join(process.cwd(), "uploads");
 const PAGES_PER_GROUP = 5;
 const CONCURRENCY = 20;
 const EMBEDDING_BATCH_SIZE = 100;
@@ -48,10 +44,10 @@ export const ingestDocument = inngest.createFunction(
   },
   { event: "document/uploaded" },
   async ({ event, step }) => {
-    const { documentId, userId, filename } = event.data as {
+    const { documentId, userId, blobUrl } = event.data as {
       documentId: string;
       userId: string;
-      filename: string;
+      blobUrl: string;
     };
 
     // Step 1: Convert PDF to images and extract markdown in a streaming pipeline.
@@ -64,17 +60,15 @@ export const ingestDocument = inngest.createFunction(
         .set({ ingestionStatus: "extracting", updatedAt: new Date() })
         .where(eq(document.id, documentId));
 
-      const filePath = join(UPLOADS_DIR, filename);
-
-      try {
-        await stat(filePath);
-      } catch {
-        throw new NonRetriableError(`File not found: ${filename}`);
-      }
-
       const pdfInitStart = Date.now();
+      const response = await fetch(blobUrl);
+      if (!response.ok) {
+        throw new NonRetriableError(`Failed to fetch PDF from blob storage`);
+      }
+      const pdfBuffer = Buffer.from(await response.arrayBuffer());
+
       const { pdf } = await import("pdf-to-img");
-      const doc = await pdf(filePath, { scale: 1.5 });
+      const doc = await pdf(pdfBuffer, { scale: 1.5 });
       const pdfInitMs = Date.now() - pdfInitStart;
       console.log(
         `[extract] pdf init: ${pdfInitMs}ms, total pages: ${doc.length}`,

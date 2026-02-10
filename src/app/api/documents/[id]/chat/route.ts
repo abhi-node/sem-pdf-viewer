@@ -1,3 +1,5 @@
+export const maxDuration = 120;
+
 import { headers } from "next/headers";
 import { eq, and, desc, lte, gte } from "drizzle-orm";
 import { cosineDistance, sql } from "drizzle-orm";

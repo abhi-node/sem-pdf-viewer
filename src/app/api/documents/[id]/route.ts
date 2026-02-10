@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { unlink } from "fs/promises";
-import { join } from "path";
+import { del } from "@vercel/blob";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/db";
 import { document } from "@/db/schema";
-
-const UPLOADS_DIR = join(process.cwd(), "uploads");
 
 export async function DELETE(
   _request: Request,
@@ -33,9 +30,9 @@ export async function DELETE(
   }
 
   try {
-    await unlink(join(UPLOADS_DIR, doc.filename));
+    await del(doc.filename);
   } catch {
-    // File already deleted from disk — ignore
+    // Blob already deleted — ignore
   }
 
   await db

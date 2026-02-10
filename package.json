@@ -6,12 +6,14 @@
     "dev": "next dev",
     "dev:inngest": "inngest dev",
     "build": "next build",
+    "vercel-build": "bunx drizzle-kit migrate && bun run build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.22",
     "@ai-sdk/react": "^3.0.79",
+    "@vercel/blob": "^2.2.0",
     "ai": "^6.0.77",
     "better-auth": "^1.4.18",
     "class-variance-authority": "^0.7.1",
