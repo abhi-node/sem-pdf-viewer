@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   experimental: {
     proxyClientMaxBodySize: "50mb",
   },
-  serverExternalPackages: ["pdf-to-img", "pdfjs-dist"],
+  serverExternalPackages: ["pdfjs-dist"],
 };
 
 export default nextConfig;

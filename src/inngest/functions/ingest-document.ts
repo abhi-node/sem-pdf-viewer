@@ -5,6 +5,7 @@ import { document, documentChunk } from "@/db/schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { generateText, embedMany } from "ai";
 import { google } from "@ai-sdk/google";
+import { PDFDocument } from "pdf-lib";
 import pLimit from "p-limit";
 const PAGES_PER_GROUP = 5;
 const CONCURRENCY = 20;
@@ -50,8 +51,8 @@ export const ingestDocument = inngest.createFunction(
       blobUrl: string;
     };
 
-    // Step 1: Convert PDF to images and extract markdown in a streaming pipeline.
-    // Pages stream from pdf-to-img directly into grouped Gemini calls — zero disk I/O.
+    // Step 1: Split PDF into page groups and send directly to Gemini for markdown extraction.
+    // Uses pdf-lib (pure JS) to split pages — no native modules needed.
     const pageInfo = await step.run("extract-pages", async () => {
       const stepStart = Date.now();
 
@@ -67,18 +68,19 @@ export const ingestDocument = inngest.createFunction(
       }
       const pdfBuffer = Buffer.from(await response.arrayBuffer());
 
-      const { pdf } = await import("pdf-to-img");
-      const doc = await pdf(pdfBuffer, { scale: 1.5 });
+      const pdfDoc = await PDFDocument.load(pdfBuffer);
+      const totalPages = pdfDoc.getPageCount();
       const pdfInitMs = Date.now() - pdfInitStart;
       console.log(
-        `[extract] pdf init: ${pdfInitMs}ms, total pages: ${doc.length}`,
+        `[extract] pdf init: ${pdfInitMs}ms, total pages: ${totalPages}`,
       );
 
-      if (doc.length === 0) {
+      if (totalPages === 0) {
         throw new NonRetriableError("PDF has no pages");
       }
 
       const limit = pLimit(CONCURRENCY);
+      const totalGroups = Math.ceil(totalPages / PAGES_PER_GROUP);
       const groupTimings: Array<{
         groupIndex: number;
         pages: number;
@@ -89,116 +91,107 @@ export const ingestDocument = inngest.createFunction(
       }> = [];
 
       const tasks: Promise<void>[] = [];
-
-      let currentGroup: Buffer[] = [];
-      let pageNum = 0;
-      let groupIndex = 0;
-      const totalGroups = Math.ceil(doc.length / PAGES_PER_GROUP);
-
       const iterStart = Date.now();
 
-      for await (const image of doc) {
-        currentGroup.push(image);
-        pageNum++;
+      for (let gIdx = 0; gIdx < totalGroups; gIdx++) {
+        const startPage = gIdx * PAGES_PER_GROUP;
+        const endPage = Math.min(startPage + PAGES_PER_GROUP, totalPages);
+        const pageIndices = Array.from(
+          { length: endPage - startPage },
+          (_, i) => startPage + i,
+        );
 
-        if (currentGroup.length === PAGES_PER_GROUP || pageNum === doc.length) {
-          const groupImages = currentGroup;
-          const gIdx = groupIndex;
-          const startPage = gIdx * PAGES_PER_GROUP;
-          const endPage = startPage + groupImages.length;
+        tasks.push(
+          limit(async () => {
+            // Create a sub-PDF with just this group's pages
+            const subDoc = await PDFDocument.create();
+            const copiedPages = await subDoc.copyPages(pdfDoc, pageIndices);
+            copiedPages.forEach((p) => subDoc.addPage(p));
+            const subPdfBytes = await subDoc.save();
 
-          tasks.push(
-            limit(async () => {
-              const payloadBytes = groupImages.reduce(
-                (sum, buf) => sum + buf.byteLength,
-                0,
-              );
+            const payloadBytes = subPdfBytes.byteLength;
 
-              const geminiStart = Date.now();
-              const { text } = await withCyclicRetry(() =>
-                generateText({
-                  model: google("gemini-3-flash-preview"),
-                  maxRetries: 0,
-                  providerOptions: {
-                    google: { thinkingConfig: { thinkingBudget: 0 } },
+            const geminiStart = Date.now();
+            const { text } = await withCyclicRetry(() =>
+              generateText({
+                model: google("gemini-3-flash-preview"),
+                maxRetries: 0,
+                providerOptions: {
+                  google: { thinkingConfig: { thinkingBudget: 0 } },
+                },
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      {
+                        type: "text",
+                        text: "Convert these PDF pages to structured Markdown. Preserve all headings, paragraphs, lists, tables, code blocks, and equations. Return only the Markdown content.",
+                      },
+                      {
+                        type: "file",
+                        data: Buffer.from(subPdfBytes),
+                        mediaType: "application/pdf" as const,
+                      },
+                    ],
                   },
-                  messages: [
-                    {
-                      role: "user",
-                      content: [
-                        {
-                          type: "text",
-                          text: "Convert these PDF pages to structured Markdown. Preserve all headings, paragraphs, lists, tables, code blocks, and equations. Return only the Markdown content.",
-                        },
-                        ...groupImages.map((buf) => ({
-                          type: "image" as const,
-                          image: buf,
-                          mimeType: "image/png" as const,
-                        })),
-                      ],
-                    },
-                  ],
-                }),
-              );
-              const geminiMs = Date.now() - geminiStart;
+                ],
+              }),
+            );
+            const geminiMs = Date.now() - geminiStart;
 
-              if (text.trim().length === 0) {
-                const timing = {
-                  groupIndex: gIdx,
-                  pages: groupImages.length,
-                  payloadKB: Math.round(payloadBytes / 1024),
-                  geminiMs,
-                  dbInsertMs: 0,
-                  contentLength: 0,
-                };
-                groupTimings.push(timing);
-                console.log(
-                  `[extract] group ${gIdx + 1}/${totalGroups} done (empty) — gemini: ${geminiMs}ms, payload: ${timing.payloadKB}KB`,
-                );
-                return;
-              }
-
-              const dbStart = Date.now();
-              await db
-                .insert(documentChunk)
-                .values({
-                  id: `${documentId}-chunk-${gIdx}`,
-                  documentId,
-                  userId,
-                  content: text,
-                  startPage: startPage + 1,
-                  endPage,
-                  chunkIndex: gIdx,
-                  tokenCount: text.length,
-                  createdAt: new Date(),
-                })
-                .onConflictDoUpdate({
-                  target: documentChunk.id,
-                  set: {
-                    content: sql`excluded.content`,
-                    tokenCount: sql`excluded.token_count`,
-                  },
-                });
-              const dbInsertMs = Date.now() - dbStart;
-
+            if (text.trim().length === 0) {
               const timing = {
                 groupIndex: gIdx,
-                pages: groupImages.length,
+                pages: pageIndices.length,
                 payloadKB: Math.round(payloadBytes / 1024),
                 geminiMs,
-                dbInsertMs,
-                contentLength: text.length,
+                dbInsertMs: 0,
+                contentLength: 0,
               };
               groupTimings.push(timing);
               console.log(
-                `[extract] group ${gIdx + 1}/${totalGroups} done — gemini: ${geminiMs}ms, db: ${dbInsertMs}ms, payload: ${timing.payloadKB}KB, content: ${text.length} chars`,
+                `[extract] group ${gIdx + 1}/${totalGroups} done (empty) — gemini: ${geminiMs}ms, payload: ${timing.payloadKB}KB`,
               );
-            }),
-          );
+              return;
+            }
 
-          currentGroup = [];
-          groupIndex++;
-        }
+            const dbStart = Date.now();
+            await db
+              .insert(documentChunk)
+              .values({
+                id: `${documentId}-chunk-${gIdx}`,
+                documentId,
+                userId,
+                content: text,
+                startPage: startPage + 1,
+                endPage,
+                chunkIndex: gIdx,
+                tokenCount: text.length,
+                createdAt: new Date(),
+              })
+              .onConflictDoUpdate({
+                target: documentChunk.id,
+                set: {
+                  content: sql`excluded.content`,
+                  tokenCount: sql`excluded.token_count`,
+                },
+              });
+            const dbInsertMs = Date.now() - dbStart;
+
+            const timing = {
+              groupIndex: gIdx,
+              pages: pageIndices.length,
+              payloadKB: Math.round(payloadBytes / 1024),
+              geminiMs,
+              dbInsertMs,
+              contentLength: text.length,
+            };
+            groupTimings.push(timing);
+            console.log(
+              `[extract] group ${gIdx + 1}/${totalGroups} done — gemini: ${geminiMs}ms, db: ${dbInsertMs}ms, payload: ${timing.payloadKB}KB, content: ${text.length} chars`,
+            );
+          }),
+        );
       }
 
       const pageIterationMs = Date.now() - iterStart;
@@ -209,11 +202,11 @@ export const ingestDocument = inngest.createFunction(
       groupTimings.sort((a, b) => a.groupIndex - b.groupIndex);
 
       console.log(
-        `[extract] complete — ${pageNum} pages, ${totalGroups} groups, total: ${totalExtractMs}ms`,
+        `[extract] complete — ${totalPages} pages, ${totalGroups} groups, total: ${totalExtractMs}ms`,
       );
 
       return {
-        pageCount: pageNum,
+        pageCount: totalPages,
         totalGroups,
         pdfInitMs,
         pageIterationMs,
